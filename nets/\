@@ -1,0 +1,99 @@
+#pragma once
+#include"../bases/NonCopyable.h"
+#include"../bases/TimeStamp.h"
+#include <algorithm>
+#include <memory>
+#include"Callbacks.h"
+#include"Buffer.h"
+#include"InetAddr.h"
+#include"Socket.h"
+
+/**
+ * 作用：对单次连接进行抽象，在单次连接上的所有用户交互均通过此类进行
+ */
+
+namespace net
+{
+class EventLoop;
+class Channel;
+
+class TcpConnection : public std::enable_shared_from_this<TcpConnection>, base::NonCopyable
+{
+public:
+    enum StateE { kConnecting, kConnected, kDisConnecting, kDisConnected };     ///<TCP连接四状态：连接中（创建TCPConnection时）
+
+                                                                                ///<               连接后（调用TCPConnection::ConnectEstablished后）
+                                                                                //                 连接结束中（调用Shutdown(用户主动关闭)）
+                                                                                //                 结束后（调用ConnectionDestroy）
+    TcpConnection(EventLoop *loop, int newConnFd, socket::InetAddr peerAddr, socket::InetAddr localAddr);
+    ~TcpConnection();
+
+    void Send(const char* msg, int len);
+    void Send(std::string);
+    void Send(Buffer& buffer);
+    void Send(const void *msg, int len);
+
+    void SendInLoop(const char* msg, int length);       ///<思考为什么需要SendInLoop;
+
+
+    int GetSocketFd() const  { return socket_->GetSocket(); }
+
+    //由TCPClient或者TCPSever调用
+    void SetOnConnectionCallback(OnConnectionCallback cb)  { onConnectionCallback_ = std::move(cb); }
+    void SetReadCallback(TcpConnectionReadCallBack cb)
+    {
+        readCallback_ = std::move(cb);
+    }
+    void SetWriteCallback(TcpConnectionWriteCallBack cb)
+    {
+        writeCallback_ = std::move(cb);
+    }
+    void SetWriteCompleteCallback(TcpConnectionWriteCompeleteCallBack cb)
+    {
+        writeCompCallback_ = std::move(cb);
+    }
+    void SetCloseCallback(OnCloseCallback cb)       { onCloseCallback_ = std::move(cb); }
+    void SetState(StateE state)                     { state_ = state; }
+        
+    void HandleRead();
+    void HandleError();
+    void HandleClose();
+
+    const socket::InetAddr& GetPeerAddr() const {  return peerAddr_; }
+    const socket::InetAddr& GetLocalAddr() const { return localAddr_; }
+
+    void ConnectEstablished();      ///<连接建立后，由TCPServer中的NewConnection调用此函数
+
+    void  ConnectDestroy();
+
+private:
+    void HandleWrite();             ///<当一次写不完时，就会调用这个
+
+
+private:
+    EventLoop *loop_;
+    
+    std::unique_ptr<socket::Socket> socket_;
+    std::unique_ptr<Channel> connectionChannel_;
+    void* content;      ///<存放泛型数据(用于时间轮)    不安全！最好用boost::any
+
+    const socket::InetAddr peerAddr_;
+    const socket::InetAddr localAddr_;
+
+    //由TCPServer或者TCPCLient传来的用户回调
+    OnConnectionCallback           onConnectionCallback_;
+    TcpConnectionReadCallBack      readCallback_;
+    TcpConnectionWriteCallBack     writeCallback_;
+    TcpConnectionWriteCompeleteCallBack writeCompCallback_;
+
+    OnCloseCallback     onCloseCallback_;  ///<用于连接关闭时调用 
+
+    Buffer inputBuffer_;    ///<输入缓冲区，输入指去读套接字，读的数据放在这
+    Buffer outputBuffer_;   ///<输出缓冲区
+
+    base::TimeStamp connectTime_;   ///<连接建立的时间
+
+    StateE state_;
+};
+
+}

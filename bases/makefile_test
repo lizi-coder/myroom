@@ -1,0 +1,6 @@
+
+all_file=*.cpp;
+
+a.out:$(all_file)
+	g++ $^ -g -pthread
+
